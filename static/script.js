@@ -108,5 +108,6 @@ function cleanText(text) {
 function speak(text) {
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.lang = "pt-BR"; // Define o idioma para português
+    utterance.rate = 1.6; // Aumenta a velocidade da fala (1.0 é o padrão, pode ser ajustado entre 0.1 e 10)  
     speechSynthesis.speak(utterance);
 }
