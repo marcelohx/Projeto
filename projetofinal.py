@@ -1,7 +1,4 @@
-
- 
-
-from flask import Flask, render_template, request, jsonify
+from flask import Flask, request, redirect, render_template, session, flash, jsonify
 import os
 import sqlite3
 import openai
@@ -16,13 +13,10 @@ from langchain.chains import LLMChain
 from langchain_community.chat_models import ChatOpenAI
 from langchain.prompts import PromptTemplate
 from langchain.schema import Document
- 
-app = Flask(__name__)
-app.secret_key = "79b2f5b603efa31bce02c15158c006dc"
 
-# Carregar variáveis de ambiente
 load_dotenv()
 app = Flask(__name__)
+app.secret_key = "79b2f5b603efa31bce02c15158c006dc"
 client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
  
 # Inicializar banco de dados
@@ -36,9 +30,8 @@ def init_db():
         user_input TEXT,
         bot_response TEXT
     )
-    """
-                   
-    """
+    """)
+    cursor.execute("""
     CREATE TABLE IF NOT EXISTS cadastro (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         nome TEXT NOT NULL,
@@ -47,13 +40,93 @@ def init_db():
         senha TEXT NOT NULL
     )
                    
-    """               
-                   )
+    """
+    )
     connection.commit()
     return connection
  
 db_connection = init_db()
+
+# Rota para exibir a página de cadastro
+@app.route("/cadastrar")
+def cadastrar():
+    return render_template("cadastrar.html")
+
+# Rota para processar o cadastro
+@app.route("/salvar_cadastro", methods=["POST"])
+def salvar_cadastro():
+    nome = request.form.get("nome")
+    email = request.form.get("email")
+    telefone = request.form.get("telefone")
+    senha = request.form.get("senha")
+    confirmar_senha = request.form.get("confirmar_senha")
  
+    # Se as senhas não coincidem
+    if senha != confirmar_senha:
+        flash("Erro: As senhas não coincidem.")
+        return redirect("/cadastrar")
+ 
+    # Conectar ao banco de dados
+    try:
+        conn = sqlite3.connect("chatbot.db", timeout=10)  # Evita erro de "database is locked"
+        cursor = conn.cursor()
+ 
+        # Inserir os dados
+        cursor.execute("INSERT INTO cadastro (nome, email, telefone, senha) VALUES (?, ?, ?, ?)",
+                       (nome, email, telefone, senha))
+ 
+        conn.commit()
+ 
+    except sqlite3.IntegrityError:
+        flash("Erro: Este e-mail já está cadastrado.")
+        return redirect("/cadastrar")
+ 
+    except sqlite3.OperationalError as e:
+        flash(f"Erro no banco de dados: {e}")
+        return redirect("/cadastrar")
+ 
+    finally:
+        cursor.close()
+        conn.close()  # Fecha a conexão corretamente
+ 
+    flash("Cadastro realizado com sucesso! Faça login.")
+    return redirect("/")
+
+# Rota para exibir a tela de login
+@app.route("/")
+def login():
+    return render_template("login.html")
+ 
+# Rota para processar o login
+@app.route("/logar", methods=["GET", "POST"])
+def logar():
+    if request.method == "GET":
+        return redirect("/")  # Redireciona para a página de login se for GET
+
+    nome = request.form.get("nome")
+    senha = request.form.get("senha")    
+
+    conn = sqlite3.connect("chatbot.db")
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM cadastro WHERE nome = ? AND senha = ?", (nome, senha))
+    usuario = cursor.fetchone()
+    conn.close()
+
+    if usuario:
+        session["usuario"] = usuario[0]
+        return redirect("/chat")  
+    else:
+        flash("Erro: nome ou senha inválidos.")
+        return redirect("/")
+
+
+# Rota para logout
+@app.route("/logout")
+def logout():
+    session.pop("usuario", None)
+    flash("Você saiu da conta.")
+    return redirect("/")
+
 def save_interaction(user_input, bot_response):
     cursor = db_connection.cursor()
     cursor.execute("INSERT INTO interactions (user_input, bot_response) VALUES (?, ?)", (user_input, bot_response))
@@ -120,8 +193,8 @@ def generate_response(user_input, previous_context):
         print(f"Erro ao gerar resposta: {e}")
         return "Desculpe, não consegui processar sua solicitação."
  
-@app.route('/')
-def home():
+@app.route('/chat')
+def tela_chat():
     return render_template('index.html')
  
 @app.route('/chat', methods=['POST'])
